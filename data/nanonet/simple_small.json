@@ -1,0 +1,112 @@
+{
+  "demands": [
+    {
+      "src": 0,
+      "dst": 4,
+      "demand_size": 3,
+      "waypoint_chance_map": {
+      }
+    },
+    {
+      "src": 5,
+      "dst": 8,
+      "demand_size": 3,
+      "waypoint_chance_map": {
+      }
+    }
+  ],
+  "links": [
+    {
+      "i": 0,
+      "j": 1,
+      "capacity": 3,
+      "weight": 1.0,
+      "utilization": 0.0
+    },
+    {
+      "i": 1,
+      "j": 2,
+      "capacity": 3,
+      "weight": 1.0,
+      "utilization": 0.0
+    },
+    {
+      "i": 2,
+      "j": 3,
+      "capacity": 3,
+      "weight": 1.0,
+      "utilization": 0.0
+    },
+    {
+      "i": 3,
+      "j": 4,
+      "capacity": 3,
+      "weight": 1.0,
+      "utilization": 0.0
+    },
+    {
+      "i": 0,
+      "j": 6,
+      "capacity": 3,
+      "weight": 1.0,
+      "utilization": 0.0
+    },
+    {
+      "i": 6,
+      "j": 7,
+      "capacity": 3,
+      "weight": 1.0,
+      "utilization": 0.0
+    },
+    {
+      "i": 7,
+      "j": 4,
+      "capacity": 3,
+      "weight": 1.0,
+      "utilization": 0.0
+    },
+    {
+      "i": 5,
+      "j": 6,
+      "capacity": 3,
+      "weight": 1.0,
+      "utilization": 0.0
+    },
+    {
+      "i": 7,
+      "j": 8,
+      "capacity": 3,
+      "weight": 1.0,
+      "utilization": 0.0
+    },
+    {
+      "i": 5,
+      "j": 9,
+      "capacity": 2,
+      "weight": 1.0,
+      "utilization": 0.0
+    },
+    {
+      "i": 9,
+      "j": 8,
+      "capacity": 2,
+      "weight": 1.0,
+      "utilization": 0.0
+    },
+    {
+      "i": 4,
+      "j": 5,
+      "capacity": 1,
+      "weight": 1.0,
+      "utilization": 0.0
+    },
+    {
+      "i": 8,
+      "j": 0,
+      "capacity": 1,
+      "weight": 1.0,
+      "utilization": 0.0
+    }
+  ],
+  "max_link_utilization": 1.0
+}
