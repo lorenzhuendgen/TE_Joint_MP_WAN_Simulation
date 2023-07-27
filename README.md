@@ -1,3 +1,4 @@
+# TODO Need to rewrite a lot, also in english
 # Replizierung der Ergebnisse - Fachprojekt
 
 Unsere Gruppe hat 3 verschiedene Algorithmen hinzugefügt, die alle in die `main.py` integriert wurden. 
