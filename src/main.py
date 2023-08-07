@@ -228,7 +228,6 @@ def abilene_all_algorithms():
         ("inverse_capacity", ""),
         # ("sequential_combination", ""),
         ("uniform_weights", ""),
-        ("priority_based", ""),
         # ("segment_ilp", "WEIGHTS"),
         # ("segment_ilp", "WAYPOINTS"),
         # ("segment_ilp", "JOINT"),
@@ -317,8 +316,8 @@ def main():
     # all_topologies_synthetic_demands()
 
     # Evaluation Fig. 4
-    # print(f"Start {HIGHLIGHT}MCF Synthetic Demands - All Algorithms - Abilene{CEND}:")
-    # abilene_all_algorithms()
+    print(f"Start {HIGHLIGHT}MCF Synthetic Demands - All Algorithms - Abilene{CEND}:")
+    abilene_all_algorithms()
 
     # Evaluation Fig. 5
     # print(f"Start {HIGHLIGHT}Scaled Real Demands - Abilene, Geant, Germany50{CEND}:")

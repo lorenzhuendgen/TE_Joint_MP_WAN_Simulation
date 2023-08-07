@@ -37,10 +37,7 @@ algo_c_map = {
     'JointWaypoints': "seagreen",
     'JointHeur': "seagreen",
     'ILP Joint': "darkgreen",
-    'Prio': "red",
-    'WPCC': "orange",
-    'PrioV': "cyan",
-    "Waypoints": "purple",
+    'WaypointMultipath': "red",
 }
 
 # maps display name to internal name of topologies
@@ -212,19 +209,21 @@ def prepare_data_and_plot(df, title, plot_type):
     df = df[df["algorithm"] != "valiants_trick"]
 
     # for the 'all/prio algorithm plot' (including ilps) show only abilene
-    if plot_type.startswith("all_algorithms") or plot_type.startswith("prio_algorithms") or plot_type.startswith(
-            "waypoint_algorithms"):
+    if plot_type.startswith("all_algorithms") or plot_type.startswith("prio_algorithms"):
         df = df[(df["topology_name"] == "abilene")]
     if not (plot_type.startswith("all_algorithms") or plot_type.startswith("prio_algorithms")
             or plot_type.startswith("overload") or plot_type.startswith("priority_vp") or plot_type.startswith(
             "waypoint_algorithms")):
         df = df[df["algorithm"] != "uniform_weights"]
 
-    if plot_type.startswith("prio_algorithms"):
+    if plot_type.startswith("multipath"):
         algo_c_map = {
             'UnitWeights': "grey",
             'InverseCapacity': "skyblue",
-            'Prio': "red"
+            'HeurOSPF': "cornflowerblue",
+            'GreedyWaypoints': "hotpink",
+            'JointHeur': "seagreen",
+            'WaypointMultipath': "red"
         }
 
     if plot_type.startswith("overload"):
@@ -233,25 +232,7 @@ def prepare_data_and_plot(df, title, plot_type):
             'InverseCapacity': "skyblue",
             'HeurOSPF': "cornflowerblue",
             'GreedyWaypoints': "hotpink",
-            'WPCC': "orange",
             'JointHeur': "seagreen",
-        }
-
-    if plot_type.startswith("priority_vp"):
-        algo_c_map = {
-            'UnitWeights': "grey",
-            'InverseCapacity': "skyblue",
-            'GreedyWaypoints': "hotpink",
-            'PrioV': "cyan"
-        }
-
-    if plot_type.startswith("waypoint_algorithms"):
-        algo_c_map = {
-            'UnitWeights': "grey",
-            'InverseCapacity': "skyblue",
-            'GreedyWaypoints': "hotpink",
-            'JointWaypoints': "seagreen",
-            "Waypoints": "purple"
         }
 
     # beautify algorithm names
@@ -264,12 +245,7 @@ def prepare_data_and_plot(df, title, plot_type):
     df["algorithm_complete"] = df["algorithm_complete"].str.replace("DemandFirstWaypoints", "GreedyWaypoints")
     df["algorithm_complete"] = df["algorithm_complete"].str.replace("SequentialCombination", "JointHeur")
     df["algorithm_complete"] = df["algorithm_complete"].str.replace("JointWaypoints", "JointWaypoints")
-    df["algorithm_complete"] = df["algorithm_complete"].str.replace("PriorityBased", "Prio")
-    df["algorithm_complete"] = df["algorithm_complete"].str.replace("Waypoints", "Waypoints")
-
-    df["algorithm_complete"] = df["algorithm_complete"].str.replace("WaypointCongestionControl", "WPCC")
-    df["algorithm_complete"] = df["algorithm_complete"].str.replace("PriorityVp", "PrioV")
-    # beautify topology names
+    df["algorithm_complete"] = df["algorithm_complete"].str.replace("WaypointMultipath", "WaypointMP")
     df["topology_name"] = df["topology_name"].apply(lambda x: top_n_map[x])
 
     # sort df by topology + algorithm name
@@ -317,23 +293,10 @@ def prepare_data_and_plot(df, title, plot_type):
         create_box_plot(df, "topology_name", "objective", "algorithm_complete", plot_file, x_label="",
                         y_label="Max. Normalized Link Utilization", fig_size=(width, 8), title=title,
                         y_lim_top=y_lim_top)
-    elif plot_type.startswith("overload"):
+    elif plot_type.startswith("multipath"):
         # plot figures for overload (uml and normalized overload)
         y_lim_top = None
-        plot_file = os.path.join(out_path, f"overload_abilene_mlu.pdf")
-        plot_file2 = os.path.join(out_path, f"overload_abilene_overload.pdf")
-        create_box_plot(df, "topology_name", "objective", "algorithm_complete", plot_file,
-                        x_label="",
-                        y_label="Max. Normalized Link Utilization", fig_size=(8, 6), title=title,
-                        y_lim_top=y_lim_top)
-        create_box_plot(df, "topology_name", "objective_overload", "algorithm_complete", plot_file2,
-                        x_label="",
-                        y_label="Normalized Total Overload in %", fig_size=(8, 6), title=title,
-                        y_lim_top=y_lim_top)
-    elif plot_type.startswith("priority_vp"):
-        # plot figures for overload (uml and normalized overload)
-        y_lim_top = None
-        plot_file = os.path.join(out_path, f"priority_vp_abilene_uml.pdf")
+        plot_file = os.path.join(out_path, f"multipath_abilene.pdf")
         create_box_plot(df, "topology_name", "objective", "algorithm_complete", plot_file,
                         x_label="",
                         y_label="Max. Normalized Link Utilization", fig_size=(8, 6), title=title,
@@ -344,23 +307,6 @@ def prepare_data_and_plot(df, title, plot_type):
         plot_file = os.path.join(out_path, f"{plot_type}.pdf")
         if plot_type == "all_algorithms":
             plot_file = os.path.join(out_path, f"all_algorithms_abilene.pdf")
-        elif plot_type == "prio_algorithms":
-            plot_file = os.path.join(out_path, f"prio_algorithms_abilene.pdf")
-            secondary_plot_file = os.path.join(out_path, f"{plot_type}_abilene_secondary.pdf")
-            create_box_plot(df, "topology_name", "secondary_objective", "algorithm_complete", secondary_plot_file,
-                            x_label="",
-                            y_label="Max. Normalized Link Utilization (Prio only)", fig_size=(8, 6), title=title,
-                            y_lim_top=y_lim_top)
-        elif plot_type == "waypoint_algorithms":
-            plot_file = os.path.join(out_path, f"waypoint_algorithms_abilene.pdf")
-            secondary_plot_file = os.path.join(out_path, f"{plot_type}_abilene_secondary.pdf")
-            create_box_plot(df, "topology_name", "percentage_of_overloaded_links", "algorithm_complete", secondary_plot_file,
-                            x_label="",
-                            y_label="Percentage of Overloaded Links", fig_size=(8, 6), title=title,
-                            y_lim_top=y_lim_top)
-        create_box_plot(df, "topology_name", "objective", "algorithm_complete", plot_file, x_label="",
-                        y_label="Max. Normalized Link Utilization", fig_size=(8, 6), title=title,
-                        y_lim_top=y_lim_top)
     return
 
 
@@ -404,46 +350,12 @@ if __name__ == "__main__":
     #     print(f"{utility.FAIL}results_real_demands.json not existing in {dir_data}{utility.CEND}")
     #
     # figure (prio_algorithms)
-    data_prio_algorithm = os.path.join(dir_data, "results_prio_algorithms.json")
-    if os.path.exists(data_prio_algorithm):
-         df_prio_algorithms = pd.DataFrame(JsonResultReader(data_prio_algorithm).fetch_results())
-         raw_dfs_title.append((df_prio_algorithms, "MCF Synthetic Demands", "prio_algorithms"))
+    data_multipath_algorithm = os.path.join(dir_data, "results_multipath.json")
+    if os.path.exists(data_multipath_algorithm):
+        df_multipath_algorithms = pd.DataFrame(JsonResultReader(data_multipath_algorithm).fetch_results())
+        raw_dfs_title.append((df_multipath_algorithms, "MCF Synthetic Demands", "multipath"))
     else:
-         print(f"{utility.FAIL}results_prio_algorithms.json not existing in {dir_data}{utility.CEND}")
-
-    # figure (waypoint_algorithms)
-    data_waypoint_algorithm = os.path.join(dir_data, "results_waypoint_algorithms.json")
-    if os.path.exists(data_waypoint_algorithm):
-        df_waypoint_algorithms = pd.DataFrame(JsonResultReader(data_waypoint_algorithm).fetch_results())
-        raw_dfs_title.append((df_waypoint_algorithms, "MCF Synthetic Demands", "waypoint_algorithms"))
-    else:
-        print(f"{utility.FAIL}results_waypoint_algorithms.json not existing in {dir_data}{utility.CEND}")
-
-    # figure (overload abilene)
-    data_prio_algorithm = os.path.join(dir_data, "results_overload.json")
-    if os.path.exists(data_prio_algorithm):
-        df_prio_algorithms = pd.DataFrame(JsonResultReader(data_prio_algorithm).fetch_results())
-        raw_dfs_title.append((df_prio_algorithms, "MCF Synthetic Demands", "overload"))
-    else:
-        print(f"{utility.FAIL}results_overload.json not existing in {dir_data}{utility.CEND}")
-
-    # figure (overload many topologies)
-    data_prio_algorithm = os.path.join(dir_data, "results_all_topologies_overload.json")
-    if os.path.exists(data_prio_algorithm):
-        df_prio_algorithms = pd.DataFrame(JsonResultReader(data_prio_algorithm).fetch_results())
-        raw_dfs_title.append((df_prio_algorithms, "MCF Synthetic Demands - Many Topologies", "overload"))
-    else:
-        print(f"{utility.FAIL}results_overload.json not existing in {dir_data}{utility.CEND}")
-
-
-    # figure (overload)
-    data_prio_algorithm = os.path.join(dir_data, "results_priority_vp.json")
-    if os.path.exists(data_prio_algorithm):
-        df_prio_algorithms = pd.DataFrame(JsonResultReader(data_prio_algorithm).fetch_results())
-        raw_dfs_title.append((df_prio_algorithms, "MCF Synthetic Demands", "priority_vp"))
-    else:
-        print(f"{utility.FAIL}results_priority_vp.json not existing in {dir_data}{utility.CEND}")
-
+        print(f"{utility.FAIL}results_multipath_algorithms.json not existing in {dir_data}{utility.CEND}")
 
     # start plot process for each dataframe
     for df_i, title_i, plot_type_i in raw_dfs_title:
