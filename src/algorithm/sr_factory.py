@@ -8,8 +8,10 @@ from algorithm.segment_routing.inverse_capacity import InverseCapacity
 from algorithm.segment_routing.segment_ilp import SegmentILP
 from algorithm.segment_routing.sequential_combination import SequentialCombination
 from algorithm.segment_routing.uniform_weights import UniformWeights
-from algorithm.segment_routing.joint_waypoints import JointWaypoints
-from algorithm.segment_routing.waypoint_multipath import WaypointMultipath
+from algorithm.segment_routing.waypoint_multipath_greedy import WaypointMultipathGreedy
+from algorithm.segment_routing.waypoint_multipath_optimized import WaypointMultipathOptimized
+from algorithm.segment_routing.waypoint_multipath_global_optimization import WaypointMultipathGlobalOptimization
+from algorithm.segment_routing.waypoint_multipath_two_phase_optimization import WaypointMultipathTwoPhaseOptimization
 
 
 def get_algorithm(algorithm_name: str, nodes: list, links: list, demands: list, weights=None, waypoints=None,
@@ -25,21 +27,23 @@ def get_algorithm(algorithm_name: str, nodes: list, links: list, demands: list, 
     elif algorithm_name == "heur_ospf_weights":
         algorithm = HeurOSPFWeights(nodes, links, demands, weights, waypoints, seed=seed, time_out=time_out)
     elif algorithm_name == "inverse_capacity":
-        algorithm = InverseCapacity(nodes, links, demands, weights, waypoints, seed=seed, demand_priorities=priorities)
+        algorithm = InverseCapacity(nodes, links, demands, weights, waypoints, seed=seed)
     elif algorithm_name == "segment_ilp":
         algorithm = SegmentILP(nodes, links, demands, weights, waypoints, waypoint_count=1, method=ilp_method,
                                splitting_factor=sf, time_out=time_out)
     elif algorithm_name == "sequential_combination":
         algorithm = SequentialCombination(nodes, links, demands, weights, waypoints, seed=seed, time_out=time_out,
                                           first_algorithm="heur_ospf_weights", second_algorithm="demand_first_waypoints")
-    elif algorithm_name == "joint_waypoints":
-        algorithm = JointWaypoints(nodes, links, demands, weights, waypoints, seed=seed, time_out=time_out,
-                                          #first_algorithm="waypoints", second_algorithm="inverse_capacity")
-                                          first_algorithm="inverse_capacity", second_algorithm="waypoints")
     elif algorithm_name == "uniform_weights":
-        algorithm = UniformWeights(nodes, links, demands, weights, waypoints, seed=seed, demand_priorities=priorities)
-    elif algorithm_name == "waypoint_multipath":
-        algorithm = WaypointMultipath(nodes, links, demands, weights, waypoints, seed=seed, demand_priorities=priorities)
+        algorithm = UniformWeights(nodes, links, demands, weights, waypoints, seed=seed)
+    elif algorithm_name == "waypoint_multipath_greedy":
+        algorithm = WaypointMultipathGreedy(nodes, links, demands, weights, waypoints, seed=seed)
+    elif algorithm_name == "waypoint_multipath_optimized":
+        algorithm = WaypointMultipathOptimized(nodes, links, demands, weights, waypoints, seed=seed)
+    elif algorithm_name == "waypoint_multipath_global_optimization":
+        algorithm = WaypointMultipathGlobalOptimization(nodes, links, demands, weights, waypoints, seed=seed)
+    elif algorithm_name == "waypoint_multipath_two_phase_optimization":
+        algorithm = WaypointMultipathTwoPhaseOptimization(nodes, links, demands, weights, waypoints, seed=seed)
     else:
         err_msg = f"algorithm not found: {algorithm_name}"
         raise Exception(err_msg)

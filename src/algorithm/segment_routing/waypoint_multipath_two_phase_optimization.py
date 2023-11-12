@@ -1,6 +1,11 @@
 """
-    Greedy Segment Routing procedure, that assigns every demand the best waypoint (can be none)
-    at the moment in regard to the mlu. Uses ECMP.
+    Derived from demand_first_waypoints.py and waypoint_multipath_optimized.py.
+    Follows the same procedure as demand_first_waypoints, assigning each demand the ideal waypoint
+    in regard to the mlu at the moment at first. After that, the locally ideal (computed at the moment) split fraction
+    for every assigned waypoint is computed, potentially reducing the amount routed via the waypoint from 1.0.
+    The ideal split fraction is computed using properties of the mlu and link utilization functions
+    as shown in the thesis.
+    Still uses ECMP.
     Link weights are as given or all set to 1.
 """
 
@@ -12,7 +17,7 @@ import numpy as np
 from algorithm.generic_sr import GenericSR
 
 
-class DemandsFirstWaypoints(GenericSR):
+class WaypointMultipathTwoPhaseOptimization(GenericSR):
     BIG_M = 10 ** 9
 
     def __init__(self, nodes: list, links: list, demands: list, weights: dict = None, waypoints: dict = None, **kwargs):
@@ -100,11 +105,82 @@ class DemandsFirstWaypoints(GenericSR):
         objective = np.max(util_map)
         return util_map, objective
 
-    def __update_flow_map(self, sp_fraction_map, flow_map, s, t, d, waypoint):
-        new_flow_map = flow_map - sp_fraction_map[s][t] * d
-        new_flow_map += sp_fraction_map[s][waypoint] * d
-        new_flow_map += sp_fraction_map[waypoint][t] * d
+    def __update_flow_map(self, sp_fraction_map, flow_map, s, t, d, waypoint, multipath_split=1.0):
+        """ If multipath_split is <1, only that portion of the traffic is rerouted via the waypoint """
+        new_flow_map = flow_map - sp_fraction_map[s][t] * (d*multipath_split)
+        new_flow_map += sp_fraction_map[s][waypoint] * (d*multipath_split)
+        new_flow_map += sp_fraction_map[waypoint][t] * (d*multipath_split)
         return new_flow_map
+
+    def __filter_obsolete_links(self, new_util_arr, marker_max_new_util):
+        """ Filters out the data for links, that cant be intersected with anymore. """
+        filter_arr = []
+        for new_util in new_util_arr:
+            if new_util <= marker_max_new_util:
+                filter_arr.append(False)
+            else:
+                filter_arr.append(True)
+        return filter_arr
+
+    def __get_ideal_split(self, current_util_map, new_util_map):
+        """
+            Finds the ideal split fraction for the routing that results in the new_util_map with the current_util_map
+            serving as the starting point (split = 0).
+            Iterates over the intersections of link utilization functions until the global minimum of the mlu is found.
+        """
+        split = dict()
+        current_link_util = []
+        new_link_util = []
+        marker_max_current_util = 0
+        marker_max_new_util = 0
+        split_marker = 0
+        for (u, v) in self.__links:
+            current_util = current_util_map[u][v]
+            new_util = new_util_map[u][v]
+            current_link_util.append(current_util)
+            new_link_util.append(new_util)
+            if current_util > marker_max_current_util:
+                marker_max_current_util = current_util
+                marker_max_new_util = new_util
+            elif current_util == marker_max_current_util and new_util > marker_max_new_util:
+                marker_max_new_util = new_util
+        current_util_arr = np.array(current_link_util)
+        new_util_arr = np.array(new_link_util)
+
+        filter_arr = self.__filter_obsolete_links(new_util_arr, marker_max_new_util)
+        current_util_arr = current_util_arr[filter_arr]
+        new_util_arr = new_util_arr[filter_arr]
+        util_change_arr = new_util_arr - current_util_arr
+
+        while split_marker < 1 and marker_max_current_util > marker_max_new_util and current_util_arr.size > 0:
+            intersections = (marker_max_current_util - current_util_arr)/(new_util_arr - marker_max_new_util)
+            min_intersection = 1
+            index = 0
+            temp_marker_max_new_util = 0
+            for intersection in intersections:
+                if intersection < min_intersection:
+                    min_intersection = intersection
+                    marker_max_current_util = current_util_arr[index]
+                    temp_marker_max_new_util = new_util_arr[index]
+                elif intersection == min_intersection and new_util_arr[index] > temp_marker_max_new_util:
+                    marker_max_current_util = current_util_arr[index]
+                    temp_marker_max_new_util = new_util_arr[index]
+                index += 1
+            if temp_marker_max_new_util > 0:
+                marker_max_new_util = temp_marker_max_new_util
+            if min_intersection < 1:
+                filter_arr = self.__filter_obsolete_links(new_util_arr, marker_max_new_util)
+                current_util_arr = current_util_arr[filter_arr]
+                new_util_arr = new_util_arr[filter_arr]
+                util_change_arr = util_change_arr[filter_arr]
+            split_marker = min_intersection
+
+        if marker_max_current_util > marker_max_new_util:
+            split_marker = 1
+            marker_max_current_util = marker_max_new_util
+        split["split"] = split_marker
+        split["objective"] = marker_max_current_util
+        return split
 
     def __demands_first_waypoints(self):
         """ main procedure """
@@ -115,6 +191,7 @@ class DemandsFirstWaypoints(GenericSR):
         current_best_flow_map = best_flow_map
         current_best_util_map = best_util_map
         current_best_objective = best_objective
+        waypoint_list = []
 
         waypoints = dict()
         sorted_demand_idx_map = dict(zip(range(len(self.__demands)), np.array(self.__demands)[:, 2].argsort()[::-1]))
@@ -135,12 +212,29 @@ class DemandsFirstWaypoints(GenericSR):
                     current_best_waypoint = waypoint
 
             if current_best_waypoint is not None:
-                waypoints[d_idx] = [(s, current_best_waypoint), (current_best_waypoint, t)]
+                waypoints[d_idx] = ([(s, current_best_waypoint), (current_best_waypoint, t)], 1)
+                waypoint_list.append((d_idx, current_best_waypoint))
             else:
-                waypoints[d_idx] = [(s, t)]
+                waypoints[d_idx] = ([(s, t)], 0)
             best_flow_map = current_best_flow_map
             best_util_map = current_best_util_map
             best_objective = current_best_objective
+
+        # second optimization phase, reevaluating split fractions
+        for (d_idx, waypoint) in waypoint_list:
+            s, t, d = self.__demands[d_idx]
+            test_flow_map = self.__update_flow_map(sp_fraction_map, best_flow_map, s, t, d, waypoint, -1)
+            test_util_map, test_objective = self.__compute_utilization(test_flow_map)
+
+            split = self.__get_ideal_split(test_util_map, best_util_map)
+            split_flow_map = self.__update_flow_map(sp_fraction_map, best_flow_map, s, t, d, waypoint, split["split"]-1)
+            split_util_map, split_objective = self.__compute_utilization(split_flow_map)
+
+            if split_objective < best_objective:
+                best_flow_map = split_flow_map
+                best_util_map = split_util_map
+                best_objective = split_objective
+                waypoints[d_idx] = ([(s, waypoint), (waypoint, t)], split["split"])
 
         self.__loads = {(u, v): best_util_map[u][v] for u, v, in self.__links}
         return self.__loads, waypoints, best_objective
@@ -167,4 +261,4 @@ class DemandsFirstWaypoints(GenericSR):
 
     def get_name(self):
         """ returns name of algorithm """
-        return f"demand_first_waypoints"
+        return f"waypoint_multipath_two_phase_optimization"

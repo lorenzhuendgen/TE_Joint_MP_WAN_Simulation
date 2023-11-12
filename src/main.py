@@ -21,7 +21,7 @@ ALGORITHM_TIME_OUT = 3600 * 4
 ACTIVE_PAIRS_FRACTION = 0.2
 
 
-def work(algorithm_name, links, n, demands, ilp_method, setup, time_out, res_handler):
+def work(algorithm_name, links, n, demands, ilp_method, setup, time_out, res_handler, weights=None):
     """ Thread worker method: starts a single test instance, i.e.,
         creates algorithm object and solves problem, appends the result to a json file """
     success = False
@@ -30,7 +30,7 @@ def work(algorithm_name, links, n, demands, ilp_method, setup, time_out, res_han
     # try:
     nodes = list(range(n))
     algorithm = sr_factory.get_algorithm(
-        algorithm_name, nodes=nodes, links=links, demands=demands, ilp_method=ilp_method, time_out=time_out)
+        algorithm_name, nodes=nodes, links=links, demands=demands, weights=weights, ilp_method=ilp_method, time_out=time_out)
     solution = algorithm.solve()
     result_dict.update(solution)
     success = True
@@ -38,8 +38,8 @@ def work(algorithm_name, links, n, demands, ilp_method, setup, time_out, res_han
     #    err_solution = error_solution()
     #    result_dict.update(err_solution)
     #    print(f"{HIGHLIGHT}Error on: {setup}\n msg: {str(ex)}{CEND}")
-    res_handler.insert_result(result_dict)
-    return success, result_dict["objective"]
+    if res_handler: res_handler.insert_result(result_dict)
+    return success, result_dict
 
 
 def work_nanonet(algorithm_name, links, n, demands, ilp_method, setup, time_out, res_handler):
@@ -110,22 +110,8 @@ def get_topology_generator(top_provider, tops_names, max_edges=None):
         yield links, n, topology_name
 
 
-def all_topologies_synthetic_demands():
-    """ Sets up tests using all topology data having complete link capacity data from SNDLib and TopologyZoo.
-    For these tests synthetic demands generated with MCF MAXIMAL are used.
-    Each test instance is executed on 4 heuristic algorithms """
-
-    # algorithm settings
-    algorithms = [
-        "demand_first_waypoints",
-        # "heur_ospf_weights",
-        "inverse_capacity",
-        # "sequential_combination",
-    ]
-    ilp_method = ""
-
-    # topology provider settings
-    topology_map = {
+"""topologies for reference:
+topology_map = {
         # SNDLib with complete capacity information
         "snd_lib": [
             "abilene",  #: |E|: 30 , |V|: 12
@@ -180,148 +166,175 @@ def all_topologies_synthetic_demands():
             "renater2010",  #: |E|: 112, |V|: 43
             "switchl3",  #: |E|: 126, |V|: 42
         ]
-    }
+    }"""
 
-    if not os.path.exists(
-            os.path.join(utility.BASE_PATH_ZOO_TOPOLOGY, f"{topology_map['topology_zoo'][0].title()}.graphml")):
-        print(f"{FAIL}The data from TopologyZoo is not available - pls follow the instruction in README.md{CEND}")
+
+def run_test(test_name, algorithms, topology_provider, topologies, mcf_method):
+    """ Sets up a test with the given parameters
+    for algorithms, use the syntax [('primary_algorithm', 'ilp_method', ['', 'secondary_algorithm1'...]),...]
+    topology_provider can either be 'snd_lib' or 'topology_zoo'
+    mcf_method can either be 'maximal' or 'maximal_concurrent' for synthetic/real demands"""
+
+    if topology_provider not in ["snd_lib", "topology_zoo"]:
+        print(f"{topology_provider} is not a valid topology provider, chose either 'snd_lib' or 'topology_zoo'")
+        return
+    if mcf_method not in ["maximal", "maximal_concurrent"]:
+        print(f"{mcf_method} is not a valid mcf method, chose either 'maximal' or 'maximal_concurrent'")
         return
 
-    # demand provider settings
-    mcf_method = "maximal"
+    topology_generator = get_topology_generator(topology_provider, topologies)
 
-    result_filename = os.path.join(OUT_DIR, "results_all_topologies.json")
+    # setup result handler
+    result_filename = os.path.join(OUT_DIR, f"results_{test_name}.json")
     result_handler = JsonResultWriter(result_filename, overwrite=True)
 
     test_idx = 0
-    # for each source of topology (SNDLib and TopologyZoo)
-    for topology_provider in topology_map:
-        topologies = topology_map[topology_provider]
-        topology_generator = get_topology_generator(topology_provider, topologies)
-        for links, n, topology in topology_generator:
-            # setup topology specific demand generator and iterate over 10 samples of demands
-            demands_generator = get_demands_generator_mcf_maximal(n, links.copy(), ACTIVE_PAIRS_FRACTION, SEED)
-            for demands, demands_provider, sample_idx in demands_generator:
-                # perform each test instance on each algorithm
-                for algorithm in algorithms:
-                    setup = get_setup_dict(algorithm, demands, demands_provider, links, ilp_method, n, sample_idx,
-                                           test_idx,
-                                           topology, topology_provider, ACTIVE_PAIRS_FRACTION, mcf_method, SEED)
+    for links, n, topology in topology_generator:
+        # setup topology specific demand generator and iterate over 10 samples of demands
+        demands_generator = get_demands_generator_scaled_snd(n, links.copy(), topology, SEED) \
+            if mcf_method == "maximal_concurrent" else get_demands_generator_mcf_maximal(n, links.copy(), ACTIVE_PAIRS_FRACTION, SEED)
+        for demands, demands_provider, sample_idx in demands_generator:
+            # perform each test instance on each algorithm
+            for algorithm in algorithms:
+                # Solve a primary algorithm first, then secondary algorithm(s) (or just primary for "")
+                wo_algorithm, ilp_method, so_algorithms = algorithm
+                wo_setup = get_setup_dict(wo_algorithm, demands, demands_provider, links, ilp_method, n, sample_idx,
+                                          test_idx,
+                                          topology, topology_provider, 1, mcf_method, SEED)
+                base_algorithm_name = wo_algorithm if ilp_method is "" else wo_algorithm + " " + ilp_method
+                print(f"submit partial WO test: {test_idx} ({topology}, {base_algorithm_name}, D_idx = {sample_idx})")
+                success, wo_result_dict = work(wo_algorithm, links.copy(), n, demands.copy(), ilp_method, wo_setup,
+                                               ALGORITHM_TIME_OUT, None)
+                for so_algorithm in so_algorithms:
+                    if so_algorithm == "":
+                        result_dict = dict()
+                        result_dict.update(wo_setup)
+                        result_dict.update(wo_result_dict)
+                        result_handler.insert_result(result_dict)
+                        objective = wo_result_dict["objective"]
+                        print(f"Test-ID: {test_idx}, success: {success} [{wo_algorithm}, "
+                              f"{topology}, {sample_idx}]: objective: {round(objective, 4)}")
+                        test_idx += 1
+                    else:
+                        setup = get_setup_dict(f"{wo_algorithm}_{so_algorithm}", demands, demands_provider, links,
+                                               ilp_method, n, sample_idx,
+                                               test_idx,
+                                               topology, topology_provider, 1, mcf_method, SEED)
 
-                    print(f"submit test: {test_idx} ({topology}, {algorithm}, D_idx = {sample_idx})")
-                    success, objective = work(algorithm, links.copy(), n, demands.copy(), ilp_method, setup,
-                                              ALGORITHM_TIME_OUT, result_handler)
-                    print(f"Test-ID: {test_idx}, success: {success} [{algorithm}, "
-                          f"{topology}, {sample_idx}]: objective: {round(objective, 4)}")
-                    test_idx += 1
+                        print(
+                            f"submit test: {test_idx} ({topology}, {wo_algorithm}_{so_algorithm}, D_idx = {sample_idx})")
+                        success, so_result_dict = work(so_algorithm, links.copy(), n, demands.copy(), ilp_method, setup,
+                                                       ALGORITHM_TIME_OUT, None, wo_result_dict["weights"])
+                        so_result_dict["process_time"] += wo_result_dict["process_time"]
+                        so_result_dict["execution_time"] += wo_result_dict["execution_time"]
+                        result_dict = dict()
+                        result_dict.update(setup)
+                        result_dict.update(so_result_dict)
+                        result_handler.insert_result(result_dict)
+                        objective = so_result_dict["objective"]
+                        print(f"Test-ID: {test_idx}, success: {success} [{wo_algorithm}_{so_algorithm}, "
+                              f"{topology}, {sample_idx}]: objective: {round(objective, 4)}")
+                        test_idx += 1
+    return
+
+
+def many_topologies_synthetic_demands1():
+    """ Tests for synthetic demands on many topologies from snd_lib """
+    algorithms = [
+        ("uniform_weights", "",
+         ["", "demand_first_waypoints", "waypoint_multipath_greedy", "waypoint_multipath_optimized",
+          "waypoint_multipath_two_phase_optimization", "waypoint_multipath_global_optimization"]),
+        ("inverse_capacity", "",
+         ["", "demand_first_waypoints", "waypoint_multipath_greedy", "waypoint_multipath_optimized",
+          "waypoint_multipath_two_phase_optimization", "waypoint_multipath_global_optimization"]),
+        ("heur_ospf_weights", "",
+         ["", "demand_first_waypoints", "waypoint_multipath_greedy", "waypoint_multipath_optimized",
+          "waypoint_multipath_two_phase_optimization", "waypoint_multipath_global_optimization"])
+    ]
+    topology_provider = "snd_lib"
+    topologies = ['geant', 'nobel-eu', 'ta1', 'cost266']
+    mcf_method = "maximal"
+    run_test("many_topologies_synthetic_demands1", algorithms, topology_provider, topologies, mcf_method)
+    return
+
+
+def many_topologies_synthetic_demands2():
+    """ Tests for synthetic demands on many topologies from snd_lib and topology_zoo """
+    algorithms = [
+        ("uniform_weights", "",
+         ["", "demand_first_waypoints", "waypoint_multipath_greedy", "waypoint_multipath_optimized",
+          "waypoint_multipath_two_phase_optimization", "waypoint_multipath_global_optimization"]),
+        ("inverse_capacity", "",
+         ["", "demand_first_waypoints", "waypoint_multipath_greedy", "waypoint_multipath_optimized",
+          "waypoint_multipath_two_phase_optimization", "waypoint_multipath_global_optimization"]),
+        ("heur_ospf_weights", "",
+         ["", "demand_first_waypoints", "waypoint_multipath_greedy", "waypoint_multipath_optimized",
+          "waypoint_multipath_two_phase_optimization", "waypoint_multipath_global_optimization"])
+    ]
+    topology_provider = "topology_zoo"
+    topologies = ['belnet2006']
+    mcf_method = "maximal"
+    run_test("many_topologies_synthetic_demands2", algorithms, topology_provider, topologies, mcf_method)
     return
 
 
 def abilene_all_algorithms():
-    """ Sets up tests for topology Abilene (snd_lib) and synthetic demands using MCF MAXIMAL.
-    Each test instance is executed on all available algorithms """
-
-    # algorithm settings
-    algorithms = [  # ("algorithm_name", "ilp_method")
-        ("demand_first_waypoints", ""),
-        # ("heur_ospf_weights", ""),
-        ("inverse_capacity", ""),
-        # ("sequential_combination", ""),
-        ("uniform_weights", ""),
-        # ("segment_ilp", "WEIGHTS"),
-        # ("segment_ilp", "WAYPOINTS"),
-        # ("segment_ilp", "JOINT"),
+    """ Tests also using ILP algorithms with synthetic demands on abilene """
+    algorithms = [
+        ("uniform_weights", "",
+         ["", "demand_first_waypoints", "waypoint_multipath_greedy", "waypoint_multipath_optimized",
+          "waypoint_multipath_two_phase_optimization", "waypoint_multipath_global_optimization"]),
+        ("inverse_capacity", "",
+         ["", "demand_first_waypoints", "waypoint_multipath_greedy", "waypoint_multipath_optimized",
+          "waypoint_multipath_two_phase_optimization", "waypoint_multipath_global_optimization"]),
+        ("heur_ospf_weights", "",
+         ["", "demand_first_waypoints", "waypoint_multipath_greedy", "waypoint_multipath_optimized",
+          "waypoint_multipath_two_phase_optimization", "waypoint_multipath_global_optimization"]),
+        ("segment_ilp", "WEIGHTS", [""]),
+        ("segment_ilp", "WAYPOINTS", [""]),
+        ("segment_ilp", "JOINT", [""])
     ]
-
-    # topology provider setup
     topology_provider = "snd_lib"
     topologies = ['abilene']
-    topology_generator = get_topology_generator(topology_provider, topologies)
-
-    # demand provider setup
     mcf_method = "maximal"
-
-    # setup result handler
-    result_filename = os.path.join(OUT_DIR, "results_all_algorithms.json")
-    result_handler = JsonResultWriter(result_filename, overwrite=True)
-
-    # fetch data for test instance and perform test
-    test_idx = 0
-    for links, n, topology in topology_generator:
-        # setup topology specific demand generator and iterate over 10 samples of demands
-        demands_generator = get_demands_generator_mcf_maximal(n, links.copy(), ACTIVE_PAIRS_FRACTION, SEED)
-        for demands, demands_provider, sample_idx in demands_generator:
-            # perform each test instance on each algorithm
-            for algorithm, ilp_method in algorithms:
-                setup = get_setup_dict(algorithm, demands, demands_provider, links, ilp_method, n, sample_idx, test_idx,
-                                       topology, topology_provider, ACTIVE_PAIRS_FRACTION, mcf_method, SEED)
-
-                print(f"submit test: {test_idx} ({topology}, {algorithm} {ilp_method}, D_idx = {sample_idx})")
-                success, objective = work(algorithm, links.copy(), n, demands.copy(), ilp_method, setup,
-                                          ALGORITHM_TIME_OUT, result_handler)
-                print(f"Test-ID: {test_idx}, success: {success} [{algorithm} {ilp_method}, "
-                      f"{topology}, {sample_idx}]: objective: {round(objective, 4)}")
-                test_idx += 1
+    run_test("abilene_all_algorithms", algorithms, topology_provider, topologies, mcf_method)
     return
 
 
 def snd_real_demands():
-    """ Sets up tests using topology and demand data from snd_lib. The demand data is scaled with MCF MAXIMAL CONCURRENT
-    Each test instance is executed  on 4 heuristic algorithms """
-
-    # algorithm settings
+    """ Tests for real demands on abilene and geant """
     algorithms = [
-        "demand_first_waypoints",
-        "heur_ospf_weights",
-        "inverse_capacity",
-        "sequential_combination",
+        ("uniform_weights", "",
+         ["", "demand_first_waypoints", "waypoint_multipath_greedy", "waypoint_multipath_optimized",
+          "waypoint_multipath_two_phase_optimization", "waypoint_multipath_global_optimization"]),
+        ("inverse_capacity", "",
+         ["", "demand_first_waypoints", "waypoint_multipath_greedy", "waypoint_multipath_optimized",
+          "waypoint_multipath_two_phase_optimization", "waypoint_multipath_global_optimization"]),
+        ("heur_ospf_weights", "",
+         ["", "demand_first_waypoints", "waypoint_multipath_greedy", "waypoint_multipath_optimized",
+          "waypoint_multipath_two_phase_optimization", "waypoint_multipath_global_optimization"])
     ]
-    ilp_method = ""
-
-    # topology provider setup
     topology_provider = "snd_lib"
-    topologies = ['abilene', 'geant', 'germany50']
-    topology_generator = get_topology_generator(topology_provider, topologies)
-
-    # demand provider setup
+    topologies = ['abilene', 'geant']
     mcf_method = "maximal_concurrent"
-
-    # setup result handler
-    result_filename = os.path.join(OUT_DIR, "results_real_demands.json")
-    result_handler = JsonResultWriter(result_filename, overwrite=True)
-
-    test_idx = 0
-    for links, n, topology in topology_generator:
-        # setup topology specific demand generator and iterate over 10 samples of demands
-        demands_generator = get_demands_generator_scaled_snd(n, links.copy(), topology, SEED)
-        for demands, demands_provider, sample_idx in demands_generator:
-            # perform each test instance on each algorithm
-            for algorithm in algorithms:
-                setup = get_setup_dict(algorithm, demands, demands_provider, links, ilp_method, n, sample_idx, test_idx,
-                                       topology, topology_provider, 1, mcf_method, SEED)
-
-                print(f"submit test: {test_idx} ({topology}, {algorithm}, D_idx = {sample_idx})")
-                success, objective = work(algorithm, links.copy(), n, demands.copy(), ilp_method, setup,
-                                          ALGORITHM_TIME_OUT, result_handler)
-                print(f"Test-ID: {test_idx}, success: {success} [{algorithm}, "
-                      f"{topology}, {sample_idx}]: objective: {round(objective, 4)}")
-                test_idx += 1
+    run_test("real_demands", algorithms, topology_provider, topologies, mcf_method)
     return
 
 
 def main():
-    """ For each figure used in the paper we perform a single test-run comprising each multiple test instances """
-    # Evaluation Fig. 3
-    # print(f"Start {HIGHLIGHT}MCF Synthetic Demands - All Topologies{CEND}:")
-    # all_topologies_synthetic_demands()
+    """ For each figure used in the thesis we perform a single test-run comprising each multiple test instances """
 
-    # Evaluation Fig. 4
+    print(f"Start {HIGHLIGHT}MCF Synthetic Demands SNDLib - Many Topologies{CEND}:")
+    many_topologies_synthetic_demands1()
+
+    print(f"Start {HIGHLIGHT}MCF Synthetic Demands TopologyZoo - Many Topologies{CEND}:")
+    many_topologies_synthetic_demands2()
+
     print(f"Start {HIGHLIGHT}MCF Synthetic Demands - All Algorithms - Abilene{CEND}:")
     abilene_all_algorithms()
 
-    # Evaluation Fig. 5
-    # print(f"Start {HIGHLIGHT}Scaled Real Demands - Abilene, Geant, Germany50{CEND}:")
-    # snd_real_demands()
+    print(f"Start {HIGHLIGHT}Scaled Real Demands - Abilene, Geant{CEND}:")
+    snd_real_demands()
 
 
 if __name__ == '__main__':

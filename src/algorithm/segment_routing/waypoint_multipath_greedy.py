@@ -1,3 +1,11 @@
+"""
+    Derived from demand_first_waypoints.py.
+    Follows the same procedure as it, assigning each demand the ideal waypoint (can be none),
+    but allows splitting the traffic in multiples of 1/8 between the waypoint route and the original one.
+    Still uses ECMP.
+    Link weights are as given or all set to 1.
+"""
+
 import time
 
 import networkit as nk
@@ -5,8 +13,7 @@ import numpy as np
 
 from algorithm.generic_sr import GenericSR
 
-# needs to be edited, copy of greedy wp so far
-class WaypointMultipath(GenericSR):
+class WaypointMultipathGreedy(GenericSR):
     BIG_M = 10 ** 9
 
     def __init__(self, nodes: list, links: list, demands: list, weights: dict = None, waypoints: dict = None, **kwargs):
@@ -94,65 +101,62 @@ class WaypointMultipath(GenericSR):
         objective = np.max(util_map)
         return util_map, objective
 
-    def __update_flow_map(self, sp_fraction_map, flow_map, s, t, d, waypoint):
-        new_flow_map = flow_map - sp_fraction_map[s][t] * d
-        new_flow_map += sp_fraction_map[s][waypoint] * d
-        new_flow_map += sp_fraction_map[waypoint][t] * d
+    def __update_flow_map(self, sp_fraction_map, flow_map, s, t, d, waypoint, multipath_split=1.0):
+        """ If multipath_split is <1, only that portion of the traffic is rerouted via the waypoint """
+        new_flow_map = flow_map - sp_fraction_map[s][t] * (d*multipath_split)
+        new_flow_map += sp_fraction_map[s][waypoint] * (d*multipath_split)
+        new_flow_map += sp_fraction_map[waypoint][t] * (d*multipath_split)
         return new_flow_map
 
-    def __split_demand(self, sp_fraction_map, flow_map, s, t, d, method):
-        # splits the demands to follow multiple paths using the desired method type
-        if method == "default":
-            # todo
-            return
-        else:
-            print(f"no valid method type given")
-        return
-
-    def __waypoint_multipath(self):
+    def __waypoint_multipath_greedy(self):
         """ main procedure """
         distances = self.__compute_distances()
         sp_fraction_map = self.__get_shortest_path_fraction_map(distances)
-        flow_map = self.__get_flow_map(sp_fraction_map)
-        util_map, objective = self.__compute_utilization(flow_map)
+        best_flow_map = self.__get_flow_map(sp_fraction_map)
+        best_util_map, best_objective = self.__compute_utilization(best_flow_map)
+        current_best_flow_map = best_flow_map
+        current_best_util_map = best_util_map
+        current_best_objective = best_objective
 
         waypoints = dict()
         sorted_demand_idx_map = dict(zip(range(len(self.__demands)), np.array(self.__demands)[:, 2].argsort()[::-1]))
         for d_map_idx in range(len(self.__demands)):
             d_idx = sorted_demand_idx_map[d_map_idx]
             s, t, d = self.__demands[d_idx]
-            # start of change
-            '''
             current_best_waypoint = None
+            current_best_split = 0
             for waypoint in range(self.__n):
                 if waypoint == s or waypoint == t:
                     continue
-                flow_map = self.__update_flow_map(sp_fraction_map, flow_map, s, t, d, waypoint)
-                util_map, objective = self.__compute_utilization(flow_map)
+                # deviating from demand_first_waypoints, allowing the split of traffic for every tested waypoint
+                for split in range(8):
+                    test_flow_map = self.__update_flow_map(sp_fraction_map, best_flow_map, s, t, d, waypoint, (split+1)/8)
+                    test_util_map, test_objective = self.__compute_utilization(test_flow_map)
 
-                if objective < objective:
-                    current_best_flow_map = flow_map
-                    current_best_util_map = util_map
-                    current_best_objective = objective
-                    current_best_waypoint = waypoint
+                    if test_objective < current_best_objective:
+                        current_best_flow_map = test_flow_map
+                        current_best_util_map = test_util_map
+                        current_best_objective = test_objective
+                        current_best_waypoint = waypoint
+                        current_best_split = split
 
             if current_best_waypoint is not None:
-                waypoints[d_idx] = [(s, current_best_waypoint), (current_best_waypoint, t)]
+                waypoints[d_idx] = ([(s, current_best_waypoint), (current_best_waypoint, t)], current_best_split)
             else:
-                waypoints[d_idx] = [(s, t)]
-            flow_map = current_best_flow_map
-            util_map = current_best_util_map
-            objective = current_best_objective
-            '''
-        self.__loads = {(u, v): util_map[u][v] for u, v, in self.__links}
-        return self.__loads, waypoints, objective
+                waypoints[d_idx] = ([(s, t)], 0)
+            best_flow_map = current_best_flow_map
+            best_util_map = current_best_util_map
+            best_objective = current_best_objective
+
+        self.__loads = {(u, v): best_util_map[u][v] for u, v, in self.__links}
+        return self.__loads, waypoints, best_objective
 
     def solve(self) -> dict:
         """ compute solution """
 
         self.__start_time = t_start = time.time()  # sys wide time
         pt_start = time.process_time()  # count process time (e.g. sleep excluded and count per core)
-        loads, waypoints, objective = self.__waypoint_multipath()
+        loads, waypoints, objective = self.__waypoint_multipath_greedy()
         pt_duration = time.process_time() - pt_start
         t_duration = time.time() - t_start
 
@@ -169,4 +173,4 @@ class WaypointMultipath(GenericSR):
 
     def get_name(self):
         """ returns name of algorithm """
-        return f"demand_first_waypoints"
+        return f"waypoint_multipath_greedy"

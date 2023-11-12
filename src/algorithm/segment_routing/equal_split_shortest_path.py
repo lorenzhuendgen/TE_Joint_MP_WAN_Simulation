@@ -3,7 +3,6 @@
 import time
 
 import networkx as nx
-from typing import Dict, Tuple, List
 
 from algorithm.generic_sr import GenericSR
 from algorithm.segment_routing.sr_utility import SRUtility
@@ -11,7 +10,7 @@ from algorithm.segment_routing.sr_utility import SRUtility
 
 class EqualSplitShortestPath(GenericSR):
     def __init__(self, nodes: list, links: list, demands: list, weights: dict = None, waypoints: dict = None,
-                 split: bool = True, demand_priorities: List[bool] = None, **kwargs):
+                 split: bool = True, **kwargs):
         super().__init__(nodes, links, demands, weights, waypoints)
 
         self.__nodes = nodes
@@ -34,8 +33,6 @@ class EqualSplitShortestPath(GenericSR):
 
         self.__create_nx_graph()
         self.__init_flow_sum_map()
-        self.__demand_priorites = demand_priorities if demand_priorities else [False for _ in demands]
-        self.__link_priorities = dict()
         return
 
     def __create_nx_graph(self):
@@ -58,17 +55,15 @@ class EqualSplitShortestPath(GenericSR):
             self.__flow_sum[(i, j)] = 0
         return
 
-    def __add_demand_val_to_path(self, path: list, demand: float, prio: bool):
+    def __add_demand_val_to_path(self, path: list, demand: float):
         for idx in range(len(path) - 1):
             i = path[idx]
             j = path[idx + 1]
 
             self.__flow_sum[(i, j)] += demand
-            lp = self.__link_priorities[i, j] if (i, j) in self.__link_priorities else False
-            self.__link_priorities[i, j] = lp or prio
         return
 
-    def __add_demand_update_objective(self, src, dst, demand, prio):
+    def __add_demand_update_objective(self, src, dst, demand):
         if (src, dst) not in self.__all_shortest_paths:
             self.__all_shortest_paths[src, dst] = list(self.__all_shortest_paths_generators[src, dst])
 
@@ -76,24 +71,12 @@ class EqualSplitShortestPath(GenericSR):
             n_splits = len(self.__all_shortest_paths[src, dst])
             split_demand = demand / n_splits
             for shortest_path in self.__all_shortest_paths[src, dst]:
-                self.__add_demand_val_to_path(shortest_path, split_demand, prio)
+                self.__add_demand_val_to_path(shortest_path, split_demand)
         else:
             # take first shortest path if multiple
             shortest_path = self.__all_shortest_paths[src, dst][0]
-            self.__add_demand_val_to_path(shortest_path, demand, prio)
+            self.__add_demand_val_to_path(shortest_path, demand)
         return
-
-    def __calc_prio_mlu(self, utilization: Dict[Tuple[int, int], float]) -> float:
-        prio_utilization = dict()
-        for link in utilization.keys():
-            lp = False
-            if link in self.__link_priorities:
-                lp = self.__link_priorities[link]
-
-            if lp:
-                prio_utilization[link] = utilization[link]
-
-        return max(prio_utilization.values())
 
     def solve(self) -> dict:
         """
@@ -107,35 +90,21 @@ class EqualSplitShortestPath(GenericSR):
         self.__get_all_shortest_paths_generator()
         for idx in self.__demands:
             s, t, d = self.__demands[idx]
-            self.__add_demand_update_objective(s, t, d, self.__demand_priorites[idx])
+            self.__add_demand_update_objective(s, t, d)
         pt_duration = time.process_time() - pt_start
         t_duration = time.time() - t_start
         utilization = {(i, j): self.__flow_sum[i, j] / self.__nx_graph[i][j]["capacity"] for i, j, _ in
                        self.__links}
         solution = {
             "objective": max(utilization.values()),
-            "objective_overload": 100*sum({(i, j): max([self.__flow_sum[(i, j)] - self.__nx_graph[i][j]["capacity"], 0])
-                                           for i, j, _ in self.__links}.values()) / sum({(i, j): self.__nx_graph[i][j]["capacity"] for i, j, _ in self.__links}.values()),
             "execution_time": t_duration,
             "process_time": pt_duration,
             "waypoints": self.__segments,
             "weights": self.__weights,
             "loads": utilization,
-            #"secondary_objective": self.__calc_prio_mlu(utilization),
-            "percentage_of_overloaded_links": self.percentage_of_overloaded_links(utilization),
         }
-
-        #print(f'* Prio MLU: {solution["secondary_objective"]}')
-
         return solution
 
     def get_name(self):
         """ returns name of algorithm """
         return f"equal_split_shortest_paths"
-
-    def percentage_of_overloaded_links(self, utilization) -> float:
-        overloaded_links = 0
-        for (u, v), lu in utilization.items():
-            if lu > 1:
-                overloaded_links += 1
-        return overloaded_links / len(self.__links)

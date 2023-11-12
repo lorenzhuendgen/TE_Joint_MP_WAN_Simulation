@@ -301,7 +301,7 @@ class HeurOSPFWeights(GenericSR):
         # bc_ := best cost
         # bu_ := best (= lowest) max link utilization
         bc_cost = bu_cost = cost
-        bc_util = bu_util = bu_util_overload =  self.BIG_M
+        bc_util = bu_util = self.BIG_M
         bc_weights = bu_weights = weights
         bc_loads = bu_loads = loads
 
@@ -322,9 +322,6 @@ class HeurOSPFWeights(GenericSR):
             sample_size = max(int(neighborhood_size * sample_factor), 5)  # max(..,5) is for too small topologies
             weights, cost, loads, distances = self.__explore_neighborhood(sample_size, weights, distances, loads)
             util = max(loads.values())
-            util_overload = 100 * sum({(i, j): max([loads[i, j]*self.__capacities[i, j] - self.__capacities[i, j], 0])
-                                       for i, j in self.__links}.values()) / sum({(i, j): self.__capacities[(i, j)]
-                                                                                  for i, j in self.__links}.values())
 
             # exit criteria (1) timeout
             if self.__timeout < time.time() - self.__start_time:
@@ -342,12 +339,12 @@ class HeurOSPFWeights(GenericSR):
 
             # keep best solution data
             if bc_cost >= cost and bu_util >= util:
-                bc_weights, bc_cost, bc_loads, bc_util, bu_util_overload, bc_distances = weights, cost, loads, util, util_overload, distances
-                bu_weights, bu_cost, bu_loads, bu_util, bu_util_overload, bu_distances = weights, cost, loads, util, util_overload, distances
+                bc_weights, bc_cost, bc_loads, bc_util, bc_distances = weights, cost, loads, util, distances
+                bu_weights, bu_cost, bu_loads, bu_util, bu_distances = weights, cost, loads, util, distances
             elif bc_cost >= cost:
-                bc_weights, bc_cost, bc_loads, bc_util, bu_util_overload, bc_distances = weights, cost, loads, util, util_overload, distances
+                bc_weights, bc_cost, bc_loads, bc_util, bc_distances = weights, cost, loads, util, distances
             elif bu_util >= util:
-                bu_weights, bu_cost, bu_loads, bu_util, bu_util_overload, bu_distances = weights, cost, loads, util, util_overload, distances
+                bu_weights, bu_cost, bu_loads, bu_util, bu_distances = weights, cost, loads, util, distances
             # better than previous solution?
             if pr_cost > cost or pr_util > util:
                 sample_factor = max(0.01, sample_factor / 3)
@@ -362,21 +359,20 @@ class HeurOSPFWeights(GenericSR):
                     self.__reset_secondary_hashtable()
 
             pr_cost, pr_util = cost, util
-        return bc_weights, bc_cost, bc_loads, bc_util, bu_weights, bu_cost, bu_loads, bu_util, bu_util_overload, it, exit_reason
+        return bc_weights, bc_cost, bc_loads, bc_util, bu_weights, bu_cost, bu_loads, bu_util, it, exit_reason
 
     def solve(self) -> dict:
         """ compute solution """
 
         self.__start_time = t_start = time.time()  # sys wide time
         pt_start = time.process_time()  # count process time (e.g. sleep excluded and count per core)
-        bc_weights, bc_cost, bc_loads, bc_util, bu_weights, bu_cost, bu_loads, bu_util, bu_util_overload, number_iterations, exit_reason = self.__ospf_heuristic()
+        bc_weights, bc_cost, bc_loads, bc_util, bu_weights, bu_cost, bu_loads, bu_util, number_iterations, exit_reason = self.__ospf_heuristic()
         pt_duration = time.process_time() - pt_start
         t_duration = time.time() - t_start
 
         solution = dict()
         # best max utilization result
         solution["objective"] = bu_util
-        solution["objective_overload"] = bu_util_overload
         solution["execution_time"] = t_duration
         solution["process_time"] = pt_duration
         solution["waypoints"] = self.__waypoints
