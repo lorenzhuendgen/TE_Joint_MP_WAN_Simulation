@@ -12,8 +12,8 @@ from utility import utility
 from utility.json_result_handler import JsonResultReader
 from utility.utility import HIGHLIGHT, CEND
 
-# DEFAULT_DIR_DATA = utility.create_dirs(f"../results_paper")
-DEFAULT_DIR_DATA = utility.create_dirs(f"../out")
+DEFAULT_DIR_DATA = utility.create_dirs(f"../results_thesis")
+# DEFAULT_DIR_DATA = utility.create_dirs(f"../out")
 DIR_PLOT = utility.create_dirs(f"../out/plots")
 
 # plot settings
